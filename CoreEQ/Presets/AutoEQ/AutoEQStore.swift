@@ -44,12 +44,22 @@ final class AutoEQStore: ObservableObject {
 
     private let service: AutoEQNetworkService
     private var catalog: AutoEQCatalog?
+    /// Why the last catalog load failed, in English, for the diagnostics
+    /// report. Nil once a load succeeds.
+    private var lastFailureReason: String?
     /// Invalidates responses from preview requests that no longer match the
     /// current selection (or have been explicitly cleared).
     private var previewRequestID = UUID()
     private var previewTask: Task<Void, Never>?
     private var catalogTask: Task<AutoEQCatalog, any Error>?
     private var catalogRequestID = UUID()
+
+    /// The alternative targets' download for the loaded revision: running, or
+    /// finished successfully. A failed one is dropped, so the next call tries
+    /// again. Shared, so a preview that needs a target waits on the same
+    /// download the catalog started instead of starting its own.
+    private var customTargetsTask: Task<Void, any Error>?
+    private var customTargetsToken = UUID()
 
     init(service: AutoEQNetworkService = AutoEQNetworkService()) {
         self.service = service
@@ -74,11 +84,6 @@ final class AutoEQStore: ObservableObject {
         return targets.filter {
             $0.supports(source: variant.source, rig: variant.rig, form: variant.form)
         }
-    }
-
-    /// Whether upstream supplies an alternative target for this measurement.
-    var supportsCustomTargets: Bool {
-        availableTargets.contains { $0.fr != nil }
     }
 
     // MARK: - Loading
@@ -107,18 +112,17 @@ final class AutoEQStore: ObservableObject {
             catalog = loaded
             models = loaded.models
             targets = loaded.targets
+            revalidateSelection()
             updateSearchResults()
             catalogRevision = loaded.revision
             catalogIsStale = loaded.isStale
+            lastFailureReason = nil
+            customTargetsTask = nil
+            customTargetsToken = UUID()
             catalogState = .loaded
-            do {
-                let custom = try await service.loadTargets(revision: loaded.revision)
-                guard catalogRequestID == requestID, !Task.isCancelled else { return }
-                targets += custom
-            } catch {
-                guard catalogRequestID == requestID, !Task.isCancelled else { return }
-                // Published corrections remain available when target metadata is offline.
-            }
+            // Published corrections remain available when target metadata is
+            // offline; a preview that needs a target retries the download.
+            try? await loadCustomTargets(revision: loaded.revision)
         } catch {
             guard catalogRequestID == requestID else { return }
             if Task.isCancelled || error is CancellationError
@@ -127,9 +131,37 @@ final class AutoEQStore: ObservableObject {
                 catalogState = catalog == nil ? .idle : .loaded
             } else {
                 catalogState = .failed(Self.message(for: error))
+                lastFailureReason = Self.diagnosticReason(for: error)
             }
         }
         if catalogRequestID == requestID { catalogTask = nil }
+    }
+
+    /// Adds the revision's alternative targets to `targets`, once. Throws the
+    /// download's error, and a later call downloads again.
+    private func loadCustomTargets(revision: String) async throws {
+        let task: Task<Void, any Error>
+        if let running = customTargetsTask {
+            task = running
+        } else {
+            let service = service
+            let token = UUID()
+            customTargetsToken = token
+            task = Task { [weak self] in
+                let custom = try await service.loadTargets(revision: revision)
+                // A catalog load replaced `targets` while this downloaded — even
+                // to the same revision — and started its own download.
+                guard let self, self.customTargetsToken == token else { return }
+                self.targets += custom
+            }
+            customTargetsTask = task
+        }
+        do {
+            try await task.value
+        } catch {
+            if customTargetsTask == task { customTargetsTask = nil }
+            throw error
+        }
     }
 
     func cancelCatalogLoad() {
@@ -146,14 +178,38 @@ final class AutoEQStore: ObservableObject {
 
     // MARK: - Selection
 
-    /// Starts each presentation in the documented empty state. Kept separate
-    /// from catalog loading so retry and stale refresh preserve in-session work.
-    func resetSelectionForBrowserOpen() {
-        searchText = ""
-        selectedModelName = nil
-        selectedVariant = nil
-        selectedTargetLabel = nil
+    /// Starts each presentation where the last one left off: the search, the
+    /// model, its measurement and target are kept, since a return to the
+    /// catalog is most often for the same headphones. Only the preview goes —
+    /// the browser loads it again and decides whether it plays.
+    ///
+    /// The kept model must have a row to be seen in. An empty search lists only
+    /// the first page of the catalog, and Escape in the field clears the search
+    /// on the way to closing the sheet, so a model found by searching is
+    /// usually off that page. When the search no longer shows it, it becomes
+    /// the search.
+    func prepareForBrowserOpen() {
         cancelPreview()
+        if let name = selectedModelName, !searchResults.contains(where: { $0.name == name }) {
+            searchText = name
+        }
+    }
+
+    /// Drops a kept selection the loaded catalog no longer has, and moves a
+    /// measurement it no longer lists back to the model's first. A target the
+    /// new revision lacks needs no check here: the target menu offers only
+    /// what the measurement supports, and loading the preview reports it.
+    private func revalidateSelection() {
+        guard let name = selectedModelName else { return }
+        guard let model = models.first(where: { $0.name == name }) else {
+            selectedModelName = nil
+            selectedVariant = nil
+            selectedTargetLabel = nil
+            return
+        }
+        if let variant = selectedVariant, !model.variants.contains(variant) {
+            selectModel(named: name)
+        }
     }
 
     /// Selects a model, its first (highest-priority) variant, and a sensible
@@ -211,10 +267,22 @@ final class AutoEQStore: ObservableObject {
         previewCandidates = nil
         previewState = .loading
         do {
+            // An alternative target is never answered with the published
+            // correction. Until its target list has arrived — just after the
+            // catalog loads, or when its download failed — the preview waits
+            // for it, and reports the download's error if there is one.
+            var target: AutoEQTarget?
+            if targetLabel != AutoEQCatalogParser.defaultTargetLabel {
+                target = availableTargets.first { $0.label == targetLabel }
+                if target == nil {
+                    try await loadCustomTargets(revision: revision)
+                    target = availableTargets.first { $0.label == targetLabel }
+                }
+                guard target != nil else { throw AutoEQError.noMatchingTarget }
+            }
+
             let candidates: ImportCandidates
-            if targetLabel != AutoEQCatalogParser.defaultTargetLabel,
-                let target = availableTargets.first(where: { $0.label == targetLabel })
-            {
+            if let target {
                 let computed = try await service.computeProfile(
                     model: model.name, variant: variant, target: target, revision: revision)
                 candidates = try AutoEQProfileBuilder.makeProfile(
@@ -288,6 +356,25 @@ final class AutoEQStore: ObservableObject {
 
     private func updateSearchResults() {
         searchResults = catalog?.models(matching: searchText) ?? []
+    }
+
+    /// The catalog for the diagnostics report: what is cached, from the
+    /// service, and how loading went this session.
+    func diagnostics() -> DiagnosticsReport.AutoEQ {
+        var report = service.cacheDiagnostics()
+        switch catalogState {
+        case .idle: report.session = .notOpened
+        case .loading: report.session = .loading
+        case .loaded: report.session = .loaded(isStale: catalogIsStale)
+        case .failed: report.session = .failed(lastFailureReason ?? "unknown")
+        }
+        return report
+    }
+
+    private static func diagnosticReason(for error: any Error) -> String {
+        if let error = error as? AutoEQError { return error.diagnosticReason }
+        if let error = error as? URLError { return "network error \(error.code.rawValue)" }
+        return String(describing: type(of: error))
     }
 
     private static func message(for error: any Error) -> String {

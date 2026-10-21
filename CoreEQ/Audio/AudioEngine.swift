@@ -34,13 +34,17 @@ final class AudioEngine: ObservableObject {
         var description: String {
             switch self {
             case .stopped:
-                return "Audio engine stopped."
+                return String(localized: "CoreEQ isn’t running.", comment: "Engine status")
             case .running(let deviceName):
-                return "Processing system audio on “\(deviceName)”."
+                return String(
+                    localized: "Equalizing the sound on “\(deviceName)”.",
+                    comment: "Engine status: the output device being equalized")
             case .awaitingPermission:
-                return "Waiting for permission to process system audio."
+                return String(
+                    localized: "Waiting for permission to reach the sound.",
+                    comment: "Engine status")
             case .failed(_, let message):
-                return "Audio engine error: \(message)"
+                return message
             }
         }
 
@@ -370,9 +374,10 @@ final class AudioEngine: ObservableObject {
             scheduleIdleCheck()
         } catch {
             teardownEngine()
-            let message =
-                (error as? CoreAudioError)?.localizedDescription ?? error.localizedDescription
-            logger.error("Engine start failed: \(message, privacy: .public)")
+            let message = error.localizedDescription
+            // The error itself, not its message: the message is for the person
+            // and may be translated, the error names the Core Audio operation.
+            logger.error("Engine start failed: \(String(describing: error), privacy: .public)")
             diagnostics = nil
             // Only a signal when TCC cannot be asked. Measured, a refusal does
             // not make tap creation fail, so with TCC's answer in hand an error
@@ -412,6 +417,27 @@ final class AudioEngine: ObservableObject {
         status = .stopped
     }
 
+    /// Builds the audio path again, so the tap takes the excluded apps as they
+    /// now are.
+    ///
+    /// When is decided, and tested, in `AppExclusion.rebuildsOnChange`.
+    ///
+    /// A rebuild is the tested route, the same one an output change takes, and
+    /// costs a moment of audio only when someone has just edited the list.
+    func reloadExcludedApps() {
+        var isRunning = false
+        var hasFailed = false
+        switch status {
+        case .running: isRunning = true
+        case .failed: hasFailed = true
+        case .stopped, .awaitingPermission: break
+        }
+        guard AppExclusion.rebuildsOnChange(isRunning: isRunning, hasFailed: hasFailed) else {
+            return
+        }
+        scheduleRestart(after: 0, reason: "excluded apps changed")
+    }
+
     func apply(filters: [EQFilter]) {
         processor.setFilters(filters)
     }
@@ -434,7 +460,9 @@ final class AudioEngine: ObservableObject {
         let device = try resolveOutputDevice()
         try refuseUnusableDevice(device)
 
-        let taps = try makeTaps(for: device)
+        let excludedApps = AppExclusion.isAvailable ? settings.excludedBundleIDs : []
+        tapExcludedApps = Set(excludedApps)
+        let taps = try makeTaps(for: device, excludingApps: excludedApps)
         tapIDs = taps.map(\.id)
 
         aggregateID = try makeAggregate(around: device, taps: taps)
@@ -473,7 +501,8 @@ final class AudioEngine: ObservableObject {
             tapBufferIndex: layout.tapBufferIndex,
             routedChannels: layout.routedChannels,
             tapCount: taps.count,
-            isMuting: captureProven
+            isMuting: captureProven,
+            excludedApps: excludedApps
         )
 
         processor.resetAudioObservation()
@@ -505,7 +534,10 @@ final class AudioEngine: ObservableObject {
             throw CoreAudioError(
                 status: OSStatus(kAudioHardwareBadDeviceError), operation: "reading the device UID")
         }
-        return OutputDevice(id: id, uid: uid, name: AudioDevices.name(of: id) ?? "Unknown Device")
+        return OutputDevice(
+            id: id, uid: uid,
+            name: AudioDevices.name(of: id)
+                ?? String(localized: "Unknown Device", comment: "An output device without a name"))
     }
 
     /// Core Audio will not nest one aggregate device inside another, and it does
@@ -529,7 +561,9 @@ final class AudioEngine: ObservableObject {
     }
 
     /// The taps this device needs, and the permission fact that follows.
-    private func makeTaps(for device: OutputDevice) throws -> [AssembledTap] {
+    private func makeTaps(
+        for device: OutputDevice, excludingApps excludedApps: [String]
+    ) throws -> [AssembledTap] {
         // Tap every process except our own output, otherwise the equalized
         // signal we play back would be captured again as a feedback loop. No
         // tap at all is better than one that hears itself: the start fails and
@@ -539,7 +573,7 @@ final class AudioEngine: ObservableObject {
         let excluded = [selfObject]
 
         let factory = LiveTapFactory(
-            outputUID: device.uid, excluded: excluded,
+            outputUID: device.uid, excluded: excluded, excludedApps: excludedApps,
             muteBehavior: captureProven ? .mutedWhenTapped : .unmuted)
         defer {
             // Without TCC to ask, whether a tap was ever created is the only
@@ -710,7 +744,8 @@ final class AudioEngine: ObservableObject {
             let (verdict, silent) = CaptureProof.evaluate(
                 hasReceivedAudio: self.processor.observed.hasReceivedAudio,
                 isAnythingPlaying: AudioDevices.isAnyProcessPlayingOutput(
-                    excluding: self.tapExcludedProcess, ignoringCapturing: true),
+                    excluding: self.tapExcludedProcess, ignoringCapturing: true,
+                    ignoringApps: self.tapExcludedApps),
                 silentWhilePlaying: silentWhilePlaying,
                 interval: Self.capturePollInterval,
                 limit: Self.silenceWhilePlayingLimit)
@@ -734,10 +769,18 @@ final class AudioEngine: ObservableObject {
                 self.tapAccess = TapAccess.resolve(tcc: self.lastTCCAnswer, proof: .notCapturing)
                 let isRefusal = self.tapAccess == .denied
                 self.status = .failed(
-                    summary: "Not capturing audio",
-                    message: "CoreEQ is not receiving any audio, so it is leaving your sound "
-                        + "alone rather than replacing it."
-                        + (isRefusal ? " This is what a refused permission looks like." : ""))
+                    summary: String(
+                        localized: "Not Receiving Audio",
+                        comment: "Menu bar extra row: sound is playing but none reaches CoreEQ"),
+                    message: isRefusal
+                        ? String(
+                            localized:
+                                "CoreEQ isn’t receiving any audio, so it’s leaving your sound alone instead of replacing it. This is what a refused permission looks like.",
+                            comment: "Engine failure, when the permission seems to be refused")
+                        : String(
+                            localized:
+                                "CoreEQ isn’t receiving any audio, so it’s leaving your sound alone instead of replacing it.",
+                            comment: "Engine failure: sound is playing but none reaches CoreEQ"))
             }
             // Kept watching either way. A verdict here is a reading of the
             // moment, not a sentence: allow the permission and the next sound
@@ -939,6 +982,17 @@ final class AudioEngine: ObservableObject {
     private var tapExcludedProcess: AudioObjectID {
         (try? processObjectID(for: getpid())) ?? AudioObjectID(kAudioObjectUnknown)
     }
+
+    /// The apps the current tap leaves out, for the same reason:
+    /// their sound is not evidence of anything about the tap.
+    ///
+    /// Only the capture proof ignores them, not the idle decision. Idle, an
+    /// excluded app playing keeps the device running, which reads as "resume";
+    /// running, it would read as "nothing playing" and go idle again — a loop
+    /// of releasing and taking the device. Kept counted there, the engine stays
+    /// running on silence while only an excluded app plays, which costs nothing
+    /// audible.
+    private var tapExcludedApps: Set<String> = []
 
     // MARK: - Change handling
 
@@ -1229,7 +1283,7 @@ final class AudioEngine: ObservableObject {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("coreeq-rate-trace.txt")
             try? report.write(to: url, atomically: true, encoding: .utf8)
-            self.logger.notice("rate trace written to \(url.path, privacy: .public)")
+            self.logger.notice("Rate trace written to \(url.path, privacy: .public)")
         }
         rateTraceDump = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
@@ -1355,15 +1409,15 @@ final class AudioEngine: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .aggregateDevice(let name):
-                return """
-                    “\(name)” is an Aggregate or Multi-Output Device, which CoreEQ \
-                    cannot process audio through. Choose a single output device.
-                    """
+                return String(
+                    localized:
+                        "“\(name)” is an aggregate or multi-output device, which CoreEQ can’t equalize. Choose a single output device.",
+                    comment: "Engine failure: the output device is made of several devices")
             case .noOutputStreams(let name):
-                return """
-                    The audio device CoreEQ built around “\(name)” reported no output \
-                    channels, so there is nowhere to send the equalized audio.
-                    """
+                return String(
+                    localized:
+                        "The audio device CoreEQ built around “\(name)” reported no output channels, so there’s nowhere to send the equalized sound.",
+                    comment: "Engine failure: the output device has no channels")
             }
         }
     }
@@ -1373,11 +1427,10 @@ final class AudioEngine: ObservableObject {
     /// once Core Audio knows the process, so the ordinary retries apply.
     private struct SelfExclusionUnavailable: Error, LocalizedError {
         var errorDescription: String? {
-            """
-            CoreEQ could not identify its own audio output, so it cannot leave \
-            itself out of what it captures. It is leaving your sound alone and \
-            will try again.
-            """
+            String(
+                localized:
+                    "CoreEQ couldn’t identify its own audio output, so it can’t leave itself out of what it captures. It’s leaving your sound alone and will try again.",
+                comment: "Engine failure: CoreEQ couldn’t find its own audio process")
         }
     }
 
@@ -1385,15 +1438,30 @@ final class AudioEngine: ObservableObject {
         let status: OSStatus
         let operation: String
 
-        var errorDescription: String? { "\(operation) failed (OSStatus \(status))" }
+        /// The operation is for the log, through `String(describing:)`; the
+        /// person gets what failed and the code to quote.
+        var errorDescription: String? {
+            String(
+                localized: "CoreEQ couldn’t set up the audio path (error \(status)).",
+                comment: "Engine failure: a Core Audio call failed; the number is its error code")
+        }
     }
 
     /// A few words naming what went wrong, for the menu.
     private static func summary(for error: any Error) -> String {
         switch error {
-        case is UnusableOutputDevice: return "Unsupported output device"
-        case is TapUnavailable: return "System audio not allowed"
-        default: return "Audio engine error"
+        case is UnusableOutputDevice:
+            return String(
+                localized: "Unsupported Output Device",
+                comment: "Menu bar extra row: CoreEQ can’t equalize this device")
+        case is TapUnavailable:
+            return String(
+                localized: "System Audio Not Allowed",
+                comment: "Menu bar extra row: CoreEQ couldn’t capture system audio")
+        default:
+            return String(
+                localized: "Equalizer Unavailable",
+                comment: "Menu bar extra row: CoreEQ couldn’t start equalizing")
         }
     }
 
@@ -1418,14 +1486,20 @@ final class AudioEngine: ObservableObject {
     private final class LiveTapFactory: TapFactory {
         let outputUID: String
         let excluded: [AudioObjectID]
+        /// The user's excluded apps, by bundle identifier. See `AppExclusion`.
+        let excludedApps: [String]
         let muteBehavior: CATapMuteBehavior
         /// Set the moment any tap is created, which is the only ground truth
         /// about the permission there is.
         private(set) var didCreateATap = false
 
-        init(outputUID: String, excluded: [AudioObjectID], muteBehavior: CATapMuteBehavior) {
+        init(
+            outputUID: String, excluded: [AudioObjectID], excludedApps: [String],
+            muteBehavior: CATapMuteBehavior
+        ) {
             self.outputUID = outputUID
             self.excluded = excluded
+            self.excludedApps = excludedApps
             self.muteBehavior = muteBehavior
         }
 
@@ -1459,6 +1533,7 @@ final class AudioEngine: ObservableObject {
             // not equalized, which is how an equalizer should fail.
             description.muteBehavior = muteBehavior
             description.isPrivate = true
+            AppExclusion.apply(excludedApps, to: description)
 
             var id = AudioObjectID(kAudioObjectUnknown)
             let status = AudioHardwareCreateProcessTap(description, &id)

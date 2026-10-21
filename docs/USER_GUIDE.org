@@ -41,7 +41,7 @@ locked to the ladder, and an added band is one that is not. Nothing is
 converted, approximated, or reconciled between the two views, so a change made
 in either is exact and reversible.
 
-Right-click a band slider for *Edit as Filter…*, which moves that band into the
+Right-click a band slider for *Edit as Filter*, which moves that band into the
 parametric editor without changing the sound.
 
 ** The response graph
@@ -50,6 +50,11 @@ The window plots the true combined magnitude response of the chain, computed
 from the same coefficients the audio path renders with — not an interpolated
 approximation. Drag a handle to change a band, double-click one to reset it,
 or double-click empty space to add a parametric band exactly where you clicked.
+
+The round handles are the graphic bands and the numbered nodes are the
+parametric bands. Clicking or dragging either one shows the editor it belongs
+to: a node opens the Parametric tab with its row selected, and a handle opens
+the Graphic tab.
 
 ** The spectrum analyzer
 
@@ -63,8 +68,8 @@ shaping.
 CoreEQ runs as a menu bar application with no Dock icon. The status menu carries
 the master switch, output device, the preset list, a live response preview, and
 three Quick EQ tone controls (bass, mid, treble) layered over the active preset
-— all without opening a window. It also holds *Open Equalizer…*, *Settings…*,
-and *Quit*: CoreEQ has no menu bar of its own, so this is where those live.
+— all without opening a window. It also holds *Open Equalizer*, *Settings…*,
+and *Quit CoreEQ*: CoreEQ has no menu bar of its own, so this is where those live.
 
 * Presets
 
@@ -72,10 +77,12 @@ Twenty-two built-in profiles — the classic set familiar from Apple Music and
 Spotify — plus your own, managed from the sidebar. Built-ins are immutable;
 your presets can be renamed, duplicated, edited, and deleted. Switching is
 instantaneous and glitch-free. Hover a built-in preset, in the sidebar or the
-menu, for a one-line description of what it is for.
+menu, for a one-line description of what it is for. The sidebar's search field
+matches the way the AutoEq catalog does: each word on its own, anywhere in the
+name, so “boost” finds both boosters.
 
 The =+= at the bottom of the sidebar creates a *New Preset* from the current
-sound, or imports one. Right-click a preset for *Rename*, *Duplicate*, *Save
+sound, opens the AutoEq catalog, or imports one. Right-click a preset for *Rename*, *Duplicate*, *Save
 Changes*, *Reset to Preset*, *Export Preset*, and *Delete*.
 
 Editing the active preset marks it *Edited*; *Save Changes* writes the values
@@ -103,7 +110,7 @@ sheet shows what that would cost. Nothing is written until you confirm.
 
 From EqualizerAPO text, CoreEQ reads =Preamp:= and =PK=, =LSC=, =HSC=, =HP= and
 =LP= filters, with Q or bandwidth in octaves. It reads UTF-8, UTF-16 and
-Windows-1252 files. A preset holds up to sixteen free filters with gain within
+Windows-1252 files. A preset holds up to sixteen parametric bands with gain within
 ±20 dB, frequency 20 Hz–20 kHz, and Q 0.1–16 for a bell or 0.1–10 for shelves and
 pass filters. Graphic bands and preamp stay within
 ±12 dB. A longer file keeps its pass filters and its strongest bands, and any
@@ -121,14 +128,17 @@ included.
 
 CoreEQ can fetch a headphone correction from the [[https://github.com/jaakkopasanen/AutoEq][AutoEq project]], without
 downloading a file by hand. The *AutoEq* button beside the =+= opens the catalog
-sheet directly. For corrections AutoEq computes for a target you choose there,
+sheet directly, as does *Browse AutoEq Catalog…* in the =+= menu. For corrections AutoEq computes for a target you choose there,
 use *Import by Hand…* in the sheet's action row: it closes the catalog, opens
 the step-by-step guide on the main window, and the correction you paste lands
 in your preset list.
 
 The catalog sheet keeps the equalizer in context while you listen. Type in the
 search field to find a model by name — the catalog holds thousands and matches
-as you type. A model measured more than once says how many measurements it has.
+as you type. Each word is matched on its own, in any order, ignoring case,
+accents and punctuation, so “sony mdr m1” finds Sony MDR-M1, and “600” finds
+both the HD 600 and the HD600. Names where the words start a word are listed
+first. A model measured more than once says how many measurements it has.
 
 The *Measurement source* menu chooses who measured the headphones and how —
 for example Oratory1990 or Rtings. Different measurements give different
@@ -146,6 +156,12 @@ without saving anything, so you can hear it against your own music. *Cancel*
 puts the previous sound back. *Import* converts the correction and keeps it as
 one of your own presets, named after the model, where it can be edited and
 exported like any other.
+
+Closing the catalog and opening it again returns to where you were: the same
+model, measurement and target, with the correction's curve drawn, and the same
+search — or the model's name, if that search no longer lists it. It does not
+play by itself — press *Play Preview*, click the model again, or choose
+something else.
 
 The catalog never refuses a correction CoreEQ can represent. When saving one
 would change it to fit CoreEQ, the browser says so, and *Import* opens the same
@@ -165,8 +181,8 @@ been downloaded still needs a connection; saved presets work independently.
 CoreEQ checks for catalog updates when the sheet opens if the cache is at least
 seven days old. The catalog and its profiles use the same Git commit so an
 update cannot mix old and new corrections. If an update fails, CoreEQ keeps
-the saved catalog and offers Retry. With no network and no cached catalog,
-the sheet offers Retry or manual import.
+the saved catalog and offers *Try Again*. With no network and no cached
+catalog, the sheet offers *Try Again* or manual import.
 
 Correction data comes from AutoEq by Jaakko Pasanen, used under the MIT licence;
 each result names the measurement source it came from.
@@ -187,8 +203,10 @@ the chain on average, so most arrive with a small trim already applied.
 The correction only ever attenuates. Cancelling a *cut* would mean raising
 every frequency the preset deliberately left alone, which is a way to make
 something clip that would not have clipped otherwise — so a preset that mostly
-cuts is left quieter, as it was meant to be. Switch *Auto* off, below the
-preamp slider, to set the trim by hand.
+cuts is left quieter, as it was meant to be. To set the trim by hand,
+drag the preamp slider: that switches *Auto* off, below it. Click *Auto* to
+hand the trim back, or double-click the slider to return to the preset’s own
+trim, as a band’s double-click returns it to the preset.
 
 CoreEQ has no volume control. Its one level control is the *preamp*, which is
 the same thing a hardware equalizer calls Level: makeup gain for what the curve
@@ -213,11 +231,12 @@ preset library itself is shared across devices.
 
 * Settings
 
-A gear in the window's header, or *Settings…* in the menu. Three tabs:
+A gear in the window's header, or *Settings…* in the menu. Four tabs:
 *General*, which holds *Open CoreEQ at login*, *Release the audio device when
 nothing is playing*, *Pause while recording system audio*, and the status of
-the System Audio Recording permission; *Diagnostics*, a report of the audio
-setup to copy into a bug report; and *About*. Clicking the CoreEQ mark at the
+the System Audio Recording permission; *Exclusions*, the apps CoreEQ leaves
+alone (see [[*Leaving apps out][Leaving apps out]]); *Diagnostics*, a report of the audio setup to
+copy into a bug report; and *About*. Clicking the CoreEQ mark at the
 top of the sidebar opens About directly.
 
 * Recordings and other audio tools
@@ -238,6 +257,29 @@ such as BlackHole — is not recognised; switch CoreEQ off while using one.
 
 Another tool that re-routes system audio, such as SoundSource, can double the
 sound the same way when both run at once.
+
+* Leaving apps out
+
+Some apps should be heard exactly as they are — a DAW while mixing or
+mastering, for one. Settings → *Exclusions* lists the apps CoreEQ leaves alone:
+their sound goes straight to the output and never passes through CoreEQ, while
+everything else stays equalized. This is not the same as a Flat preset, which
+still takes the sound in and plays it back.
+
+*Add…* chooses an app from the disk, so it can be excluded before it is even
+open. Each listed app has a switch. Switched off, it stays on the list but is
+equalized again, ready to switch back on. Select an app and click *Remove*, or
+press Delete, to take it off the list. A change applies at once, with a
+moment's break in the sound while CoreEQ rebuilds. An excluded app stays
+excluded when it quits and is opened again.
+
+Browsers can't be excluded. They play through a helper process that macOS
+shares between apps, so leaving Safari out would mean leaving out every app
+that shows web content. Apps that play their own sound — DAWs, music players,
+video players — work.
+
+Exclusion needs macOS 26 or later. On earlier versions the tab says so, and
+every app is equalized.
 
 * How it works
 
@@ -275,7 +317,8 @@ What CoreEQ does not do, on purpose:
 - *Not bit-perfect.* CoreEQ works on the system mix, after macOS has mixed and
   resampled every app's audio. At Flat the sound passes through unchanged, and
   switched off CoreEQ leaves the audio path entirely, but it cannot give an app
-  exclusive access to the device.
+  exclusive access to the device. The closest it comes is [[*Leaving apps out][leaving an app out]],
+  which keeps CoreEQ out of that app's path altogether.
 - *One curve for all channels.* On outputs with more than two channels (HDMI,
   DisplayPort, USB interfaces) every channel is equalized, with the same curve.
   There are no per-channel curves and no room correction.
@@ -300,7 +343,7 @@ General, and as a row in the menu bar.
 | What CoreEQ says                              | What it means                                         | The button                                                                                       |
 |-----------------------------------------------+-------------------------------------------------------+--------------------------------------------------------------------------------------------------|
 | CoreEQ needs to reach the sound to change it   | macOS has not asked yet, or CoreEQ was just updated   | *Allow…* shows the macOS prompt                                                                  |
-| CoreEQ is not allowed to process audio         | The permission was refused                            | *Open System Settings…*; turn CoreEQ on there, then choose *Quit & Reopen* (or *Relaunch CoreEQ*) |
+| CoreEQ isn’t allowed to reach the sound        | The permission was refused                            | *Open System Settings*; turn CoreEQ on there, then choose *Quit & Reopen* (or *Relaunch CoreEQ*)  |
 
 CoreEQ never builds its audio path before the answer is yes.
 
@@ -313,9 +356,11 @@ quit and reopen it — so a change takes effect on the next launch.
 *The fastest route to an answer is the diagnostics report*, in Settings →
 Diagnostics → Copy. It names the output device and what CoreEQ built around
 it, whether audio is reaching CoreEQ, how often the engine has restarted and
-why, and whether the output clipped. Attach it to any bug report.
+why, and whether the output clipped. Once you have opened the AutoEq catalog,
+it also names the catalog version CoreEQ has cached and why the last load
+failed, if it did. Attach it to any bug report.
 
-- *CoreEQ says it is not allowed to process audio.* Allow CoreEQ under Screen &
+- *CoreEQ says it isn’t allowed to reach the sound.* Allow CoreEQ under Screen &
   System Audio Recording in System Settings → Privacy & Security, then choose
   *Quit & Reopen* when macOS asks, or *Relaunch CoreEQ* on the card.
 - *The permission is on in System Settings and CoreEQ still hears nothing.*

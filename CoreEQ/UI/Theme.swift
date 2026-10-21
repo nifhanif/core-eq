@@ -50,10 +50,17 @@ enum Theme {
     /// Why CoreEQ has stepped aside for a recording, where there is room to
     /// say it: the main window, and the setting that controls it. The menu has
     /// room for `recordingPauseTitle` alone.
-    static let recordingPauseTitle = "Paused while recording"
-    static let recordingPauseExplanation =
-        "Screen recordings capture both your apps’ sound and CoreEQ’s equalized copy, which "
-        + "sounds doubled. CoreEQ steps aside until the recording stops."
+    static var recordingPauseTitle: String {
+        String(
+            localized: "Paused While Recording",
+            comment: "Heading and menu bar extra row: CoreEQ stepped aside for a screen recording")
+    }
+    static var recordingPauseExplanation: String {
+        String(
+            localized:
+                "Screen recordings capture both your apps’ sound and CoreEQ’s equalized copy, which sounds doubled. CoreEQ steps aside until the recording stops.",
+            comment: "Why CoreEQ pauses while a screen recording captures system audio")
+    }
 
     /// Every size and weight the app is allowed to use.
     ///
@@ -199,7 +206,8 @@ enum Theme {
         /// them.
         ///
         /// Each is sized to its widest content, not to its title: "20000 Hz",
-        /// "+12.0 dB", "10.00", and "High Shelf" are what these have to hold.
+        /// "19999.9 Hz", "+12.0 dB", "16.00", and "High Shelf" are what these have
+        /// to hold.
         enum Column {
             /// Colour swatch and band number, up to two digits.
             ///
@@ -214,7 +222,9 @@ enum Theme {
             static let indexGap: CGFloat = 6
             static let enable: CGFloat = 30
             static let type: CGFloat = 100
-            static let frequency: CGFloat = 94
+            /// Wide enough for a frequency with its decimal, "19999.9 Hz".
+            /// At 94 it held "20000 Hz" and clipped an imported "3302.8".
+            static let frequency: CGFloat = 108
             static let gain: CGFloat = 92
             static let q: CGFloat = 76
             /// Just the delete button: there is no power icon, because the
@@ -223,7 +233,7 @@ enum Theme {
         }
     }
 
-    /// The vertical rhythm the Band Levels and Preamp blocks share.
+    /// The vertical rhythm the Graphic editor and the Preamp column share.
     ///
     /// Both are a value, a track, and a caption. Driving both from these numbers
     /// is what keeps the preamp track starting and ending exactly level with the

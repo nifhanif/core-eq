@@ -15,9 +15,12 @@ enum AutoEQCatalogProgress: Sendable, Equatable {
 
     var message: String {
         switch self {
-        case .checkingRevision: return "Checking for AutoEq updates…"
-        case .downloading: return "Downloading the AutoEq catalog…"
-        case .preparing: return "Preparing the AutoEq catalog…"
+        case .checkingRevision:
+            return String(localized: "Checking for AutoEq updates…", comment: "AutoEq progress")
+        case .downloading:
+            return String(localized: "Downloading the AutoEq catalog…", comment: "AutoEq progress")
+        case .preparing:
+            return String(localized: "Preparing the AutoEq catalog…", comment: "AutoEq progress")
         }
     }
 }
@@ -123,7 +126,9 @@ actor AutoEQNetworkService {
     func loadTargets(revision: String) async throws -> [AutoEQTarget] {
         guard Self.isRevision(revision) else { throw AutoEQError.malformedData }
         let data = try await cachedInput(revision: revision, path: "webapp/data/targets.json")
-        let targets = try JSONDecoder().decode([AutoEQTarget].self, from: data)
+        guard let targets = try? JSONDecoder().decode([AutoEQTarget].self, from: data) else {
+            throw AutoEQError.malformedData
+        }
         return targets.filter { $0.fr?.isValid == true }
     }
 
@@ -181,10 +186,9 @@ actor AutoEQNetworkService {
         if path.hasSuffix(".csv") {
             _ = try AutoEQCurve.csv(data)
         } else {
-            let targets = try JSONDecoder().decode([AutoEQTarget].self, from: data)
-            guard targets.contains(where: { $0.fr?.isValid == true }) else {
-                throw AutoEQError.malformedData
-            }
+            guard let targets = try? JSONDecoder().decode([AutoEQTarget].self, from: data),
+                targets.contains(where: { $0.fr?.isValid == true })
+            else { throw AutoEQError.malformedData }
         }
         try Task.checkCancellation()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -242,26 +246,47 @@ actor AutoEQNetworkService {
     }
 
     private func fetchData(from url: URL) async throws -> Data {
-        let (data, response) = try await session.data(for: request(for: url))
+        let (data, response) = try await Self.mappingTransportErrors {
+            try await session.data(for: request(for: url))
+        }
         try Task.checkCancellation()
         try validate(response)
         return data
+    }
+
+    /// Turns a failed connection into `AutoEQError.offline`, so every download
+    /// — catalog, correction, target, measurement — reports it in CoreEQ's
+    /// words rather than whichever of URLSession's thirty-odd it happened to
+    /// be. Cancellation stays what it is: closing the sheet is not a failure.
+    private static func mappingTransportErrors<T>(
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch let error as URLError where error.code != .cancelled {
+            throw AutoEQError.offline
+        }
     }
 
     private func downloadIndex(
         revision: String, progress: @Sendable (AutoEQCatalogProgress) async -> Void
     ) async throws -> Data {
         let url = Self.resultURL(revision: revision, path: "INDEX.md")
-        let (bytes, response) = try await session.bytes(for: request(for: url))
+        let (bytes, response) = try await Self.mappingTransportErrors {
+            try await session.bytes(for: request(for: url))
+        }
         try validate(response)
         let total = response.expectedContentLength > 0 ? Int(response.expectedContentLength) : nil
         var data = Data()
         await progress(.downloading(received: 0, total: total))
-        for try await byte in bytes {
-            data.append(byte)
-            if data.count.isMultiple(of: 32_768) {
-                try Task.checkCancellation()
-                await progress(.downloading(received: data.count, total: total))
+        // The connection can also drop part-way through the body.
+        try await Self.mappingTransportErrors {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count.isMultiple(of: 32_768) {
+                    try Task.checkCancellation()
+                    await progress(.downloading(received: data.count, total: total))
+                }
             }
         }
         try Task.checkCancellation()
@@ -269,9 +294,48 @@ actor AutoEQNetworkService {
         return data
     }
 
-    private var snapshotURL: URL { cacheDirectory.appendingPathComponent("catalog-v1.json") }
+    private nonisolated var snapshotURL: URL {
+        cacheDirectory.appendingPathComponent("catalog-v1.json")
+    }
 
-    private func readSnapshot() -> CatalogSnapshot? {
+    /// What is cached, for the diagnostics report: the catalog's revision,
+    /// when it was checked, how many models it lists, and how many corrections
+    /// are kept on disk. The session's own state is the store's to add.
+    ///
+    /// Reads files only, so it needs nothing from the actor and the Settings
+    /// window can ask without waiting on a download in progress.
+    nonisolated func cacheDiagnostics() -> DiagnosticsReport.AutoEQ {
+        var report = DiagnosticsReport.AutoEQ()
+        if let snapshot = readSnapshot() {
+            report.revision = snapshot.revision
+            report.checkedAt = snapshot.checkedAt
+            report.modelCount = (try? snapshot.catalog())?.models.count
+        }
+        // Counted folder by folder rather than by comparing paths: the cache
+        // can be reached through a symbolic link, and an enumerated path need
+        // not start the way the folder's own path does.
+        let corrections = [
+            cacheDirectory.appendingPathComponent("profiles"),
+            cacheDirectory.appendingPathComponent("computed-v\(AutoEQLocalSolver.version)"),
+        ]
+        report.cachedCorrections = corrections.map { Self.regularFiles(in: $0).count }
+            .reduce(0, +)
+        report.cacheBytes = Self.regularFiles(in: cacheDirectory)
+            .reduce(0) { $0 + Int64($1.fileSize ?? 0) }
+        return report
+    }
+
+    /// Every regular file under `directory`, with its size.
+    private nonisolated static func regularFiles(in directory: URL) -> [URLResourceValues] {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .isRegularFileKey]
+        let urls =
+            FileManager.default.enumerator(at: directory, includingPropertiesForKeys: Array(keys))?
+            .compactMap { $0 as? URL } ?? []
+        return urls.compactMap { try? $0.resourceValues(forKeys: keys) }
+            .filter { $0.isRegularFile == true }
+    }
+
+    private nonisolated func readSnapshot() -> CatalogSnapshot? {
         guard let data = try? Data(contentsOf: snapshotURL),
             let cached = try? JSONDecoder().decode(CatalogSnapshot.self, from: data),
             cached.version == Self.cacheVersion, Self.isRevision(cached.revision),

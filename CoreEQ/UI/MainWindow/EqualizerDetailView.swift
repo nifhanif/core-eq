@@ -158,16 +158,21 @@ struct EqualizerDetailView: View {
                 // it is not the way back on: the way back is a different output
                 // device. Its position still shows what the user asked for, so
                 // the setting is waiting rather than lost.
-                Toggle("", isOn: $audioEngine.isEnabled)
+                // Labelled for VoiceOver; the style draws only the switch.
+                Toggle("Equalizer", isOn: $audioEngine.isEnabled)
                     .toggleStyle(.power)
                     .labelsHidden()
                     .disabled(!audioEngine.canProcess)
                     .opacity(audioEngine.canProcess ? 1.0 : 0.5)
-                    .accessibilityLabel("Equalizer")
                     .help(
                         audioEngine.canProcess
                             ? (audioEngine.isEnabled
-                                ? "Turn the equalizer off" : "Turn the equalizer on")
+                                ? String(
+                                    localized: "Turn the equalizer off",
+                                    comment: "Power button help tag")
+                                : String(
+                                    localized: "Turn the equalizer on",
+                                    comment: "Power button help tag"))
                             : audioEngine.status.description)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -319,11 +324,15 @@ struct EqualizerDetailView: View {
     }
 
     private var deviceAccessibilityValue: String {
-        let preset =
-            profileManager.isModified
-            ? "\(profileManager.activeProfileName), edited"
-            : profileManager.activeProfileName
-        return "\(outputs.defaultDeviceName), playing \(preset)"
+        profileManager.isModified
+            ? String(
+                localized:
+                    "\(outputs.defaultDeviceName), playing \(profileManager.activeProfileName), edited",
+                comment: "Output device, for VoiceOver: device name and its edited preset")
+            : String(
+                localized:
+                    "\(outputs.defaultDeviceName), playing \(profileManager.activeProfileName)",
+                comment: "Output device, for VoiceOver: device name and its preset")
     }
 
     // MARK: - Graph
@@ -341,12 +350,24 @@ struct EqualizerDetailView: View {
             // lights that handle up and puts the value beside it.
             stripHoveredBand: hoveredBand,
             stripDraggedBand: draggingBand,
-            onBandGainChange: { slot, gain in profileManager.setGain(gain, forBandAt: slot) },
+            // Every point on the plot is a grip on one of the two editors, and
+            // touching it shows that editor: a node's settings are in the table,
+            // a handle's slider is in the strip. This is how the two kinds of
+            // point get explained without a label — the window answers "where
+            // does this live?" the first time anyone grabs one. Hover never
+            // switches, or sweeping the pointer across the plot would flip the
+            // tabs back and forth; nor does a reset, which undoes rather than
+            // edits.
+            onBandGainChange: { slot, gain in
+                profileManager.setGain(gain, forBandAt: slot)
+                show(.graphic)
+            },
             onBandReset: { slot in profileManager.resetBand(at: slot) },
             onFilterMove: { id, frequency, gain in
                 profileManager.setFilterFrequency(frequency, id: id)
                 profileManager.setFilterGain(gain, id: id)
                 selectedFilterID = id
+                show(.parametric)
             },
             onFilterReset: { id in profileManager.resetFilter(id: id) },
             onFilterCreate: { frequency, gain in
@@ -354,7 +375,11 @@ struct EqualizerDetailView: View {
             },
             // The graph and the parametric table share one selection: clicking
             // a node highlights its row, choosing a row rings its node.
-            onFilterSelect: { id in selectedFilterID = id },
+            onFilterSelect: { id in
+                selectedFilterID = id
+                if id != nil { show(.parametric) }
+            },
+            onBandSelect: { _ in show(.graphic) },
             // Only while the Parametric tab is showing, so a stray double-click
             // on the graph can never conjure a band the user cannot see.
             allowsFilterCreation: tab == .parametric,
@@ -366,11 +391,12 @@ struct EqualizerDetailView: View {
         // A low floor, not a comfortable one: every point the fixed sections
         // don't need goes here, so the graph is large whenever the window is,
         // and it compresses rather than pushing the window past the screen when
-        // the window is small and the Filters section is open.
+        // the window is small.
         //
-        // The floor and `contentMinSize` are a pair. At the window minimum the
-        // fixed sections plus the editing area come to ~640 pt with this floor;
-        // raise it and the editor clips instead of the graph compressing.
+        // The floor and `contentMinSize` are a pair. With this floor the fixed
+        // sections plus the editing area come to ~640 pt, inside the window's
+        // 720 pt minimum; raise the floor past that, or lower the minimum below
+        // it, and the editor clips instead of the graph compressing.
         .frame(minHeight: 120, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -480,7 +506,7 @@ struct EqualizerDetailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Settings")
-        .help("CoreEQ settings")
+        .help("Open CoreEQ settings")
     }
 
     /// Two working states of one preset, and the switch between them.
@@ -501,7 +527,7 @@ struct EqualizerDetailView: View {
         .labelsHidden()
         .fixedSize()
         .accessibilityLabel("Comparison slot")
-        .help("Two versions of this preset — switch to compare them")
+        .help("Two versions of this preset; switch between them to compare")
         // Bound to local state and applied afterwards, rather than written
         // straight into the manager through the binding.
         //
@@ -520,6 +546,13 @@ struct EqualizerDetailView: View {
             selectedSlot = slot
         }
         .onAppear { selectedSlot = profileManager.abSlot }
+    }
+
+    /// Switches the editor only when it isn't already showing, so a drag —
+    /// which reports every step — writes the remembered tab once rather than
+    /// on every move.
+    private func show(_ editor: EditorTab) {
+        if tab != editor { tab = editor }
     }
 
     /// The tab strip, mounted on the editor block's own border.
@@ -588,7 +621,10 @@ struct EqualizerDetailView: View {
             )
             .frame(width: Theme.BandRow.columnWidth, height: trackHeight)
             .accessibilityLabel("\(BandFormat.frequency(band.frequency)) hertz")
-            .accessibilityValue(String(format: "%+.1f decibels", band.gain))
+            .accessibilityValue(
+                String(
+                    localized: "\(String(format: "%+.1f", band.gain)) decibels",
+                    comment: "Gain, for VoiceOver, such as “+2.5 decibels”"))
 
             Text(BandFormat.frequency(band.frequency))
                 .font(Theme.Font.secondary)
@@ -615,7 +651,7 @@ struct EqualizerDetailView: View {
             // A move, not a conversion: the lifted filter keeps this band's
             // frequency, gain, and Q, and the slot stays in the strip at 0 dB,
             // so the sound is identical either side of the command.
-            Button("Edit as Filter…") {
+            Button("Edit as Filter") {
                 if let id = profileManager.editBandAsFilter(slot: slot) {
                     selectedFilterID = id
                     // Follow the filter to where it now lives, or the command
@@ -711,7 +747,7 @@ struct EqualizerDetailView: View {
     /// they want when it does.
     private func engineOverlay(_ message: String) -> some View {
         VStack(spacing: 8) {
-            Label("Not processing audio", systemImage: "exclamationmark.triangle.fill")
+            Label("Not Equalizing", systemImage: "exclamationmark.triangle.fill")
                 .font(Theme.Font.heading)
                 .foregroundStyle(.primary)
 
@@ -787,9 +823,16 @@ struct EqualizerDetailView: View {
     private var engineWarning: String? {
         switch audioEngine.status {
         case .running: return nil
-        case .stopped: return "Audio engine stopped"
-        case .awaitingPermission: return "Waiting for audio permission"
-        case .failed: return "Audio engine error"
+        case .stopped:
+            return String(
+                localized: "CoreEQ isn’t running", comment: "Warning icon, for VoiceOver")
+        case .awaitingPermission:
+            return String(
+                localized: "Waiting for the audio permission",
+                comment: "Warning icon, for VoiceOver")
+        case .failed:
+            return String(
+                localized: "Equalizer unavailable", comment: "Warning icon, for VoiceOver")
         }
     }
 

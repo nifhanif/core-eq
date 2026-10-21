@@ -21,9 +21,9 @@ import SwiftUI
 /// parametric table's rows carry: one band, pointed at from either side.
 ///
 /// Double-click resets a point's gain to 0 dB. With `allowsFilterCreation` set —
-/// which the main window ties to the Filters section being open — double-
-/// clicking empty space creates a filter there instead, so a user who never
-/// opens that section can never make one by accident.
+/// which the main window ties to the Parametric tab showing — double-clicking
+/// empty space creates a filter there instead, so a user who never opens that
+/// tab can never make one by accident.
 struct FrequencyResponseView: View {
     /// The whole chain: ladder filters and free filters together.
     let filters: [EQFilter]
@@ -62,9 +62,13 @@ struct FrequencyResponseView: View {
     /// selection, so clicking the empty plot puts the table back to no row
     /// chosen rather than leaving a stale one behind.
     var onFilterSelect: ((_ id: UUID?) -> Void)?
+    /// A click landed on a band handle. The selection is still cleared — the
+    /// ladder has no row in the table — but the window shows the strip that
+    /// band belongs to.
+    var onBandSelect: ((_ slot: Int) -> Void)?
 
     /// Whether double-clicking empty space creates a filter. Off unless the
-    /// user has opened the Filters section.
+    /// Parametric tab is showing.
     var allowsFilterCreation = false
 
     /// Compact, read-only presentation for the menu-bar Quick EQ: no grid,
@@ -75,6 +79,11 @@ struct FrequencyResponseView: View {
     /// Compact read-only presentation for previews that still need the same
     /// frequency and gain context as the main graph. The full graph labels
     /// every band; compact mode keeps five evenly spaced anchors.
+    ///
+    /// Read-only means no grips: the band markers and numbered filter nodes are
+    /// for dragging, and in a picture that cannot be edited they only crowd it —
+    /// and, sitting at each filter's own gain rather than on the curve, they
+    /// read as points the curve misses. Only the curve and its axes are drawn.
     var compact = false
 
     /// The ratio used by the catalog preview. It follows the main graph's
@@ -186,12 +195,17 @@ struct FrequencyResponseView: View {
 
                     Canvas { context, _ in
                         drawGrid(context, size)
-                        drawHighlightedFilterCurve(context, size)
+                        if !compact { drawHighlightedFilterCurve(context, size) }
                         drawCurve(context, size)
-                        drawBandMarkers(context, size)
-                        drawFilterNodes(context, size)
+                        if !compact {
+                            drawBandMarkers(context, size)
+                            drawFilterNodes(context, size)
+                        }
                     }
                 }
+                // Nothing to grab in a compact preview, so the pointer passes
+                // through: no hover highlight, no drag, no double-click.
+                .allowsHitTesting(!compact)
                 .gesture(dragGesture(size))
                 .simultaneousGesture(doubleClickGesture(size))
                 .simultaneousGesture(selectionGesture(size))
@@ -210,7 +224,7 @@ struct FrequencyResponseView: View {
                 .fill(.quaternary.opacity(showsBackground ? (minimal ? 0.35 : 0.5) : 0))
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityLabel("Equalizer frequency response curve")
+        .accessibilityLabel("Frequency response")
         .accessibilityHidden(minimal)
     }
 
@@ -259,9 +273,13 @@ struct FrequencyResponseView: View {
     private func selectionGesture(_ size: CGSize) -> some Gesture {
         SpatialTapGesture(count: 1)
             .onEnded { value in
-                if case .filter(let id)? = handle(near: value.location, size) {
+                switch handle(near: value.location, size) {
+                case .filter(let id):
                     onFilterSelect?(id)
-                } else {
+                case .band(let slot):
+                    onFilterSelect?(nil)
+                    onBandSelect?(slot)
+                case nil:
                     onFilterSelect?(nil)
                 }
             }
@@ -584,7 +602,7 @@ struct FrequencyResponseView: View {
                 lineWidth: isHighlighted || isSelected ? 3 : 2
             )
 
-            let number = Text("\(index + 1)")
+            let number = Text(verbatim: "\(index + 1)")
                 .font(Theme.Font.valueEmphasized)
                 .foregroundStyle(Color.black.opacity(isActive ? 0.75 : 0.3))
             context.draw(number, at: center, anchor: .center)

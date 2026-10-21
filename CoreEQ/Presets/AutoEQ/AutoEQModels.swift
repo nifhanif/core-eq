@@ -115,31 +115,35 @@ struct AutoEQEqualizedProfile: Sendable, Hashable, Codable {
 /// The full browsable catalog: every model plus the targets they can be
 /// corrected toward.
 struct AutoEQCatalog: Sendable {
-    var models: [AutoEQModel]
+    let models: [AutoEQModel]
     var targets: [AutoEQTarget]
     var revision: String
     var isStale: Bool = false
 
-    /// Models whose full name contains `query`, case- and diacritic-insensitively.
+    /// `models`' names, prepared once rather than on every keystroke.
+    private let searchNames: [SearchableName]
+
+    init(models: [AutoEQModel], targets: [AutoEQTarget], revision: String, isStale: Bool = false) {
+        self.models = models
+        self.targets = targets
+        self.revision = revision
+        self.isStale = isStale
+        searchNames = models.map { SearchableName($0.name) }
+    }
+
+    /// Models whose name has every word of `query` in it, by `SearchQuery`'s
+    /// rule: names where the words start words first, then catalog order.
     ///
     /// An empty query is a browse rather than a search and returns the first
     /// `limit` models in catalog order, which keeps the unfiltered list usable
     /// without materializing thousands of rows.
     func models(matching query: String, limit: Int = 300) -> [AutoEQModel] {
         guard limit > 0 else { return [] }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return Array(models.prefix(limit)) }
+        let search = SearchQuery(query)
+        guard !search.isEmpty else { return Array(models.prefix(limit)) }
 
-        var result: [AutoEQModel] = []
-        for model in models {
-            if model.name.range(
-                of: trimmed, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-            {
-                result.append(model)
-                if result.count == limit { break }
-            }
-        }
-        return result
+        let ranked = search.ranked(Array(models.indices)) { searchNames[$0] }
+        return ranked.prefix(limit).map { models[$0] }
     }
 }
 
@@ -165,38 +169,51 @@ enum AutoEQError: Error, LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .offline:
-            return "Couldn’t download AutoEq data from GitHub. Check your connection and retry."
+            return String(
+                localized:
+                    "CoreEQ couldn’t download AutoEq data from GitHub. Check your internet connection and try again.",
+                comment: "AutoEq error")
         case .httpStatus(let code):
             return code == 403 || code == 429
-                ? "GitHub is limiting downloads. Try again later."
-                : "Couldn’t download AutoEq data (HTTP \(code)). Try again."
+                ? String(
+                    localized: "GitHub is limiting downloads. Try again later.",
+                    comment: "AutoEq error: GitHub refused because of too many requests")
+                : String(
+                    localized: "CoreEQ couldn’t download AutoEq data (HTTP \(code)). Try again.",
+                    comment: "AutoEq error: the number is the HTTP status code")
         case .invalidResponse:
-            return "AutoEq replied with an unexpected response."
+            return String(localized: "AutoEq sent an unexpected response.", comment: "AutoEq error")
         case .emptyCatalog:
-            return "AutoEq returned an empty catalog."
+            return String(localized: "The AutoEq catalog is empty.", comment: "AutoEq error")
         case .noMatchingTarget:
-            return "No correction target matches this headphone."
+            return String(
+                localized: "No correction target matches this model.", comment: "AutoEq error")
         case .unsupportedVariant:
-            return "No supported published correction is available for this measurement."
+            return String(
+                localized: "There’s no published correction CoreEQ supports for this measurement.",
+                comment: "AutoEq error")
         case .malformedData:
-            return "AutoEq returned data CoreEQ could not read."
+            return String(
+                localized: "AutoEq sent data CoreEQ couldn’t read.", comment: "AutoEq error")
         case .unsupportedFilter(let type):
-            return "The profile uses filters CoreEQ cannot render (\(type))."
+            return String(
+                localized: "The correction uses filters CoreEQ can’t apply (\(type)).",
+                comment: "AutoEq error: the filter type code follows in parentheses")
         }
     }
 
-    var recoverySuggestion: String? {
+    /// The error in a few English words, for the diagnostics report, which
+    /// stays in English whatever language the app is in.
+    var diagnosticReason: String {
         switch self {
-        case .offline:
-            return "Check your internet connection and try again."
-        case .httpStatus, .invalidResponse, .malformedData, .emptyCatalog:
-            return "Try again in a moment; AutoEq may be temporarily unavailable."
-        case .noMatchingTarget:
-            return "Choose a different measurement variant."
-        case .unsupportedVariant:
-            return "Choose a different measurement source or import a correction by hand."
-        case .unsupportedFilter:
-            return "Choose a different target or variant."
+        case .offline: return "offline"
+        case .httpStatus(let code): return "HTTP \(code)"
+        case .invalidResponse: return "unexpected response"
+        case .emptyCatalog: return "empty catalog"
+        case .noMatchingTarget: return "no matching target"
+        case .unsupportedVariant: return "unsupported measurement"
+        case .malformedData: return "unreadable data"
+        case .unsupportedFilter(let type): return "unsupported filter \(type)"
         }
     }
 }

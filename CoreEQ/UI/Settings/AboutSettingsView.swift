@@ -11,8 +11,6 @@ struct AboutSettingsView: View {
     /// The release list rather than this version's tag: a tag exists only once
     /// the release is cut, so a build made between releases would link to a 404.
     private static let releases = URL(string: "https://github.com/andreypudov/core-eq/releases")!
-    /// The AutoEQ project the catalog browser's correction data comes from.
-    private static let autoEQRepository = URL(string: "https://github.com/jaakkopasanen/AutoEq")!
 
     var body: some View {
         VStack(spacing: 10) {
@@ -35,25 +33,14 @@ struct AboutSettingsView: View {
                 .frame(maxWidth: 300)
 
             HStack(spacing: 14) {
-                Link("Source code", destination: Self.repository)
-                Link("Release notes", destination: Self.releases)
+                Link("Source Code", destination: Self.repository)
+                Link("Release Notes", destination: Self.releases)
             }
             .font(Theme.Font.label)
 
             Text(copyright)
                 .font(Theme.Font.secondary)
                 .foregroundStyle(.tertiary)
-
-            // The one third-party credit, at the copyright's own weight: the
-            // catalog browser's data carries a licence too, and a licence note
-            // is exactly what the smallest type is for.
-            HStack(spacing: 4) {
-                Link("AutoEq", destination: Self.autoEQRepository)
-                Text("correction data © Jaakko Pasanen, MIT")
-            }
-            .font(Theme.Font.secondary)
-            .foregroundStyle(.tertiary)
-            .tint(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 20)
@@ -64,7 +51,8 @@ struct AboutSettingsView: View {
     private var versionLine: String {
         let version =
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        return "Version \(version ?? "—")"
+        return String(
+            localized: "Version \(version ?? "—")", comment: "About: the app’s version number")
     }
 
     private var copyright: String {

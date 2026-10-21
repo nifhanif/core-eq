@@ -13,7 +13,7 @@ import SwiftUI
 /// word, and it is also what AutoEQ and headphone-correction profiles call the
 /// value — so an imported one will line up with the label without translation.
 ///
-/// Drag the slider, or double-click it to return to 0 dB. The value reads out
+/// Drag the slider, or double-click it to return to the preset's trim. The value reads out
 /// under the track rather than in a field: the plot above already shows the
 /// whole curve moving with it, so this only has to say where it is.
 struct GlobalGainView: View {
@@ -66,10 +66,22 @@ struct GlobalGainView: View {
                         isEnabled: isEnabled,
                         isActive: isDragging || isHovering,
                         onDragChange: { isDragging = $0 },
-                        onReset: { profileManager.setPreamp(0) }
+                        onReset: { profileManager.resetPreamp() }
                     )
                     .frame(width: Theme.BandRow.columnWidth, height: trackHeight)
-                    .disabled(profileManager.isAutoGain)
+                    // Live while Auto is on too: dragging takes the trim over
+                    // and turns Auto off. See `ProfileManager.takeOverPreamp`.
+                    .help(
+                        profileManager.isAutoGain
+                            ? String(
+                                localized:
+                                    "Set automatically while Auto is on; drag to set it by hand",
+                                comment: "Preamp slider help tag, while automatic gain is on")
+                            : String(
+                                localized:
+                                    "Drag to set; double-click to return to the preset’s value",
+                                comment: "Preamp slider help tag")
+                    )
                     // The scale is an overlay so it costs no layout width: the
                     // track keeps the block's centreline and the rows above and
                     // below centre on it without being nudged.
@@ -86,7 +98,10 @@ struct GlobalGainView: View {
                     .onHover { isHovering = $0 }
                     .accessibilityLabel("Preamp")
                     .accessibilityValue(
-                        String(format: "%+.1f decibels", profileManager.currentPreamp))
+                        String(
+                            localized:
+                                "\(String(format: "%+.1f", profileManager.currentPreamp)) decibels",
+                            comment: "Gain, for VoiceOver, such as “+2.5 decibels”"))
 
                     // The row a band column spends on its frequency. This
                     // column has no frequency to name, which is what makes room
@@ -112,7 +127,7 @@ struct GlobalGainView: View {
         }
         .opacity(isEnabled ? 1.0 : 0.5)
         .help(
-            "Output trim applied after the whole chain — use it to give back headroom a boosted preset takes"
+            "Output trim applied after the whole chain; use it to give back the headroom a boosted preset takes"
         )
     }
 
@@ -123,14 +138,13 @@ struct GlobalGainView: View {
     /// track: with the trim's own value moved up there, this row came free, and
     /// a switch that reads left to right needs no excuse made for it.
     ///
-    /// While it is on, the slider is disabled rather than merely ignored: a
-    /// control that moves under the pointer and springs back is worse than one
-    /// that declines to move.
+    /// While it is on, the slider still moves: dragging it switches Auto off,
+    /// so the slider is never a control that silently refuses.
     private var autoToggle: some View {
         Button {
             profileManager.setAutoGain(!profileManager.isAutoGain)
         } label: {
-            Text("AUTO")
+            Text("AUTO", comment: "Automatic gain switch, written in capitals as a badge")
                 .font(Theme.Font.labelEmphasized)
                 .kerning(0.6)
                 // Sized to the word, not to the column: a switch stretched the
@@ -160,19 +174,29 @@ struct GlobalGainView: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel("Automatic gain")
-        .accessibilityValue(profileManager.isAutoGain ? "On" : "Off")
+        .accessibilityValue(
+            profileManager.isAutoGain
+                ? String(localized: "On", comment: "Switch state, for VoiceOver")
+                : String(localized: "Off", comment: "Switch state, for VoiceOver")
+        )
         .accessibilityAddTraits(profileManager.isAutoGain ? [.isSelected] : [])
         .help(
             profileManager.isAutoGain
-                ? "The trim is computed from the chain — switch off to set it by hand"
-                : "Compute the trim from the chain, so a boosted preset stays at the loudness it started from"
+                ? String(
+                    localized:
+                        "The trim is computed from the chain; turn this off to set it by hand",
+                    comment: "Automatic gain help tag, while on")
+                : String(
+                    localized:
+                        "Compute the trim from the chain, so a boosted preset stays at the loudness it started from",
+                    comment: "Automatic gain help tag, while off")
         )
     }
 
     private var preamp: Binding<Double> {
         Binding(
             get: { profileManager.currentPreamp },
-            set: { profileManager.setPreamp($0) }
+            set: { profileManager.takeOverPreamp($0) }
         )
     }
 }

@@ -39,6 +39,48 @@ extension AutoEQIntegrationTests {
                     atPath: cache.appendingPathComponent("catalog-v1.json").path))
         }
 
+        /// The diagnostics report's half that comes from disk: the cached
+        /// revision and model count, and the corrections kept, counted apart
+        /// from the measurement inputs that sit beside them.
+        @Test func cacheDiagnosticsReportsWhatIsCached() throws {
+            let cache = AutoEQTestFixtures.makeCacheDirectory()
+            defer { AutoEQTestFixtures.remove(cache) }
+            let checkedAt = Date(timeIntervalSince1970: 1_792_000_000)
+            try AutoEQTestFixtures.writeCache(into: cache, checkedAt: checkedAt)
+            let files = [
+                "profiles/\(AutoEQTestFixtures.revision)/a.txt",
+                "profiles/\(AutoEQTestFixtures.revision)/b.txt",
+                "computed-v\(AutoEQLocalSolver.version)/c.json",
+                "inputs/\(AutoEQTestFixtures.revision)/measurement",
+            ]
+            for file in files {
+                let url = cache.appendingPathComponent(file)
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(repeating: 0, count: 1_000).write(to: url)
+            }
+
+            let report = service(cache).cacheDiagnostics()
+
+            #expect(report.revision == AutoEQTestFixtures.revision)
+            #expect(report.checkedAt == checkedAt)
+            #expect(report.modelCount == 3)
+            #expect(report.cachedCorrections == 3)
+            #expect(report.cacheBytes > 4_000, "the snapshot and all four files count")
+        }
+
+        @Test func cacheDiagnosticsOfAnEmptyCacheIsEmpty() {
+            let cache = AutoEQTestFixtures.makeCacheDirectory()
+            defer { AutoEQTestFixtures.remove(cache) }
+
+            let report = service(cache).cacheDiagnostics()
+
+            #expect(report.revision == nil)
+            #expect(report.modelCount == nil)
+            #expect(report.cachedCorrections == 0)
+            #expect(!report.hasBeenUsed)
+        }
+
         @Test func freshDiskCacheWorksAcrossServiceInstancesWithoutNetwork() async throws {
             let cache = AutoEQTestFixtures.makeCacheDirectory()
             defer { AutoEQTestFixtures.remove(cache) }
@@ -163,6 +205,40 @@ extension AutoEQIntegrationTests {
                 model: "Alpha Headphones", variant: variant,
                 revision: AutoEQTestFixtures.nextRevision)
             #expect(StubURLProtocol.requests.count == 2)
+        }
+
+        @Test func aFailedConnectionReportsInCoreEQsWordsForEveryDownload() async throws {
+            let cache = AutoEQTestFixtures.makeCacheDirectory()
+            defer { AutoEQTestFixtures.remove(cache) }
+            let variant = AutoEQVariant(
+                source: "oratory1990", form: "over-ear",
+                resultPath: "oratory1990/GRAS 43AG-7 over-ear/Alpha Headphones")
+            for code in [URLError.Code.timedOut, .notConnectedToInternet, .networkConnectionLost] {
+                StubURLProtocol.setHandler { _ in throw URLError(code) }
+                await #expect(throws: AutoEQError.offline) {
+                    _ = try await service(cache).fetchPrecomputedParametricEQ(
+                        model: "Alpha Headphones", variant: variant,
+                        revision: AutoEQTestFixtures.revision)
+                }
+                await #expect(throws: AutoEQError.offline) {
+                    _ = try await service(cache).loadTargets(revision: AutoEQTestFixtures.revision)
+                }
+            }
+        }
+
+        @Test func aConnectionDroppedDuringTheIndexReportsInCoreEQsWords() async throws {
+            let cache = AutoEQTestFixtures.makeCacheDirectory()
+            defer { AutoEQTestFixtures.remove(cache) }
+            let catalog = AutoEQTestFixtures.catalogHandler()
+            StubURLProtocol.setHandler { request in
+                if request.url!.path.hasSuffix("/INDEX.md") {
+                    throw URLError(.networkConnectionLost)
+                }
+                return try catalog(request)
+            }
+            await #expect(throws: AutoEQError.offline) {
+                _ = try await service(cache).loadCatalog(forceRefresh: true)
+            }
         }
 
         @Test func rejectsRestrictedSourcesAndUnsafePathsBeforeNetwork() async throws {

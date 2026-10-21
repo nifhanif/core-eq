@@ -35,25 +35,33 @@ struct FilterListView: View {
         .animation(.easeInOut(duration: 0.18), value: profileManager.freeFilters.count)
     }
 
-    private var hasBands: Bool { !profileManager.freeFilters.isEmpty }
-
     /// The column titles. Same widths and same spacing as a band row, from the
     /// same tokens, so the two can't drift apart.
     private var columnTitles: some View {
         HStack(spacing: 0) {
-            title("#", width: Theme.FilterRow.Column.index, alignment: .leading)
+            title(Text(verbatim: "#"), width: Theme.FilterRow.Column.index, alignment: .leading)
             ColumnGap()
-            title("Enable", width: Theme.FilterRow.Column.enable)
+            title(
+                Text("On", comment: "Band list column: band turned on"),
+                width: Theme.FilterRow.Column.enable)
             ColumnGap()
-            title("Type", width: Theme.FilterRow.Column.type)
+            title(
+                Text("Type", comment: "Band list column: filter type"),
+                width: Theme.FilterRow.Column.type)
             ColumnGap()
-            title("Frequency", width: Theme.FilterRow.Column.frequency)
+            title(
+                Text("Frequency", comment: "Band list column"),
+                width: Theme.FilterRow.Column.frequency)
             ColumnGap()
-            title("Gain", width: Theme.FilterRow.Column.gain)
+            title(Text("Gain", comment: "Band list column"), width: Theme.FilterRow.Column.gain)
             ColumnGap()
-            title("Q", width: Theme.FilterRow.Column.q)
+            title(
+                Text("Q", comment: "Band list column: the band’s width"),
+                width: Theme.FilterRow.Column.q)
             Spacer(minLength: Theme.FilterRow.columnSpacing)
-            title("Actions", width: Theme.FilterRow.Column.actions, alignment: .trailing)
+            title(
+                Text("Actions", comment: "Band list column: the row’s buttons"),
+                width: Theme.FilterRow.Column.actions, alignment: .trailing)
         }
         .frame(height: Theme.FilterRow.headerHeight)
         .padding(.horizontal, 8)
@@ -64,9 +72,8 @@ struct FilterListView: View {
     /// full length if it is the wider of the two: the columns are sized for the
     /// controls in them, and "Actions" over a 24-point button would otherwise
     /// arrive as "Ac…".
-    private func title(_ text: String, width: CGFloat, alignment: Alignment = .center) -> some View
-    {
-        Text(text)
+    private func title(_ text: Text, width: CGFloat, alignment: Alignment = .center) -> some View {
+        text
             // The size the Preamp readout and the band captions use, so the
             // window has one voice for the small print rather than a different
             // one per section.
@@ -101,8 +108,11 @@ struct FilterListView: View {
             .padding(.leading, 8)
             .help(
                 profileManager.canAddFilter
-                    ? "Add a parametric band"
-                    : "CoreEQ holds up to \(BuiltInProfiles.maxFreeFilters) parametric bands"
+                    ? String(localized: "Add a parametric band", comment: "Add Band help tag")
+                    : String(
+                        localized:
+                            "CoreEQ holds up to \(BuiltInProfiles.maxFreeFilters) parametric bands",
+                        comment: "Add Band help tag, when the band limit is reached")
             )
         }
     }
@@ -185,10 +195,12 @@ struct FilterListView: View {
                             }
                         }
                     }
-                    // A whole number of rows, never a sliced one. The leftover is
-                    // at most a row's height and sits below the table as padding,
-                    // where it reads as space rather than as a band cut in half.
-                    .frame(height: visibleHeight(in: geometry.size.height))
+                    // Every point the block has, as a system list takes it. The
+                    // height used to be rounded down to whole rows, which left
+                    // up to a row of empty space under the last band even when
+                    // more were waiting below; a row cut off at the edge is
+                    // also what says there is more to scroll.
+                    .frame(height: geometry.size.height)
                     .scrollBounceBehavior(.basedOnSize)
                     // Only a few rows are visible at a time, so a band chosen by
                     // clicking its node on the graph is often one the table isn't
@@ -202,21 +214,16 @@ struct FilterListView: View {
                     }
                 }
             }
+            // A new list for a new chain. The lazy stack that pins the titles
+            // keeps its scroll offset when the content shrinks, so selecting a
+            // short preset after scrolling down a long one left the offset
+            // past the last row and the table looked empty; scrolling to the
+            // first row did not undo it. The first band's identity changes
+            // exactly when the chain is replaced — a preset, A/B, a device, an
+            // import, a preview — and never while one is edited, since an edit
+            // keeps every filter's identity.
+            .id(profileManager.freeFilters.first?.id)
         }
-    }
-
-    /// The tallest whole number of rows that fits in `available`, plus the
-    /// pinned title row above them.
-    ///
-    /// A row and the hairline under it are one pitch; the last row has no
-    /// hairline, hence the odd point back. Never less than one row, so a very
-    /// short window shows a band rather than a sliver of one.
-    private func visibleHeight(in available: CGFloat) -> CGFloat {
-        let pitch = Theme.FilterRow.height + Theme.FilterRow.separator
-        let forRows = available - Theme.FilterRow.headerHeight
-        let rows = max(1, ((forRows + Theme.FilterRow.separator) / pitch).rounded(.down))
-        return min(
-            rows * pitch - Theme.FilterRow.separator + Theme.FilterRow.headerHeight, available)
     }
 
     /// Says what a band is for and how to make one, and stops.
@@ -226,7 +233,7 @@ struct FilterListView: View {
     /// hasn't is not reading an empty box.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("No bands yet.")
+            Text("No Bands")
                 .font(Theme.Font.label)
                 .foregroundStyle(.secondary)
 

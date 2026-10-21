@@ -15,7 +15,7 @@ part worth having written down.
 
 * 1.10
 
-Not tagged yet.
+Released <2026-10-23 Fri>.
 
 ** Asking for the audio permission, and knowing the answer
 
@@ -61,6 +61,78 @@ muted the other's equalized output and nothing reached the speakers. A copy that
 finds another already running now asks which one to quit before it builds
 anything.
 
+** The AutoEq catalog
+
+Contributed by Sebastian Ullrich in #40, the step past the file import he added
+in 1.9: the *AutoEq* button beside the =+= now searches AutoEq's corrections by
+headphone model, rather than sending you to autoeq.app for a file. Selecting a
+measurement plays it after a short pause, against whatever is playing, without
+saving anything; *Cancel* puts the previous sound back, and *Import* keeps it as
+a preset of your own. Crinacle's measurements are left out.
+
+It is CoreEQ's first network connection, so the roadmap pinned its shape before
+any of it was built: it happens only on explicit action. Nothing is fetched at
+launch or when a device appears. Opening the sheet downloads the catalog, and
+checks it again only once it is a week old; a correction downloads when it is
+selected. Both come from one AutoEq commit, so an update can never mix old and
+new corrections, and both are cached, so a correction heard once previews
+offline. No data is bundled with the app.
+
+The published correction is used as AutoEq wrote it. Choosing another
+compatible *Target curve* computes a correction instead, in the app, with a
+native fitter written for this rather than AutoEq's Python. Run on AutoEq's
+default target across 100 catalog entries, it lands within 0.36 dB RMS of
+AutoEq's own result below 6 kHz at the median, and 1.48 dB at worst, in about
+60 ms. [[file:AUTOEQ_LOCAL.org][AUTOEQ_LOCAL.org]] has the method
+and what it does not reproduce.
+
+Imports keep what they read. 1.9 clamped a value past CoreEQ's limits and
+counted it; now free filters reach ±20 dB, and any value that would still change is listed before
+anything is added — the filter, the old and new value, the limit responsible,
+and what it does to the response in dB. A bell past the ±12 dB of the graphic
+range can be kept exact as a free filter or clipped onto its slider. The same
+sheet serves the catalog, a pasted profile, and a dropped file.
+
+*Done* for published corrections: 100 of them imported with no change at all
+to their response or preamp. Not yet checked across the whole catalog, or for
+alternative targets against an AutoEq reference; both are noted in
+AUTOEQ_LOCAL.org.
+
+** Leaving apps out
+
+Asked for in #20, by a musician who needs Studio One, Logic Pro and the rest of
+a mastering chain heard as they are while everything else stays corrected. A
+Flat preset is not the answer: the sound still enters the tap and comes back.
+Settings → *Exclusions* now lists apps CoreEQ leaves out of the tap altogether,
+so their sound reaches the output without passing through CoreEQ at all.
+
+It needs macOS 26, because that is where the tap learned to exclude by bundle
+identifier, and measured on hardware, that is what makes it work. Excluded by
+identifier, an app is left out whether or not it is running when the tap is
+built, on the device-bound taps as well as the global one. With the system's
+process restore on, it stays out when it quits and comes back; without it, a
+relaunched app was measured back in the tap. Before macOS 26 the same thing
+would mean following every launch and quit by hand — a second implementation
+for a shrinking set of Macs, so the tab says what it needs instead.
+
+*What it cannot do: browsers.* Safari's sound comes from =com.apple.WebKit.GPU=,
+a helper shared by every app that shows web content. Excluding Safari's
+identifier, or the helper's, left the sound in the tap; only the helper's
+process did, and that would exclude Mail and the rest with it. So the tab
+offers only apps that are apps, never helpers inside one, and the guide says
+browsers cannot be excluded. Chromium-based apps play through helpers too, and
+are expected to behave the same; not measured.
+
+*Found in testing: an excluded app is not evidence.* After a launch, CoreEQ
+waits for the tap's first sound before equalizing, and calls the tap broken if
+it stays silent while something plays. With only an excluded app playing, the
+tap is silent by design, and CoreEQ said it was not processing audio; the
+switches then did nothing, because a change only rebuilt a running engine. The
+check now ignores excluded apps, and a change rebuilds after a failure too.
+
+Nothing changes for anyone who excludes nothing: the tap is built exactly as
+before. The diagnostics report lists excluded apps when there are any.
+
 ** Narrower bells
 
 Asked for in #41. A parametric bell's Q now goes to 16, about a twelfth of an
@@ -74,6 +146,66 @@ old one. Studio EQs reach 40 or 100; a listening EQ has no use for that. AutoEq'
 published corrections stay below 6 and are unaffected. Imported bells up to 16
 now arrive exactly, and the graph samples every filter's centre, so a bell
 narrower than its point spacing is drawn at the height it is heard.
+
+** Smoother previews in the catalog
+
+Moving from one AutoEq model to the next played your own preset for a moment in
+between: each preview was undone before the next one was applied, so for the
+length of a download the sound went back to the preset underneath, with its own
+trim, and then jumped to the new correction. It sounded like two corrections
+applied one after the other. A preview now replaces the previous one directly,
+and the gains and trim move over the same 50 ms ramp as any other change.
+
+** Finding things
+
+Both searches — presets in the sidebar and models in the catalog — now match
+word by word, in any order, ignoring case, accents and punctuation. “sony mdr
+m1” found nothing, because the name is written “Sony MDR-M1” and the search
+looked for the typed text as one piece. It finds it now, and so do “mdrm1”, and
+“600” for both the HD 600 and the HD600: headphone names are model numbers
+written every way at once. Names where the typed words start a word come first.
+
+Deliberately not fuzzy. Every result contains what was typed, punctuation
+aside, so nothing turns up that cannot be explained; letters-in-order matching
+over a few thousand similar names finds mostly noise.
+
+*Browse AutoEq Catalog…* is also in the =+= menu now, beside New Preset and
+Import, for anyone who looks for it there rather than at the button beside it.
+
+** The main window
+
+- *The editor follows the point you click.* The graph carries two kinds of
+  point — round handles for the graphic bands, numbered nodes for the
+  parametric ones — and nothing said where each one's settings were. Clicking
+  or dragging a node now shows the Parametric tab with its row selected; a
+  handle shows the Graphic tab. Hovering never switches.
+- *The preamp can be dragged with AUTO on.* It sat greyed out with no sign why.
+  Dragging it now turns AUTO off and takes the trim over; double-clicking puts
+  it back to the preset's own value, or back to AUTO for a preset that uses it,
+  the way a double-click on a graphic band returns it to the preset.
+- *The band list no longer comes up empty.* Scrolled down a long parametric
+  preset, then switched to a shorter one, the list kept its old position past
+  the end of the new content and showed nothing. It starts from the top on a
+  preset change.
+- The band list fills the editor's height, and the frequency field is wide
+  enough for “19999.9 Hz”.
+
+** Interface text in one place
+
+Every string the interface shows is now in a String Catalog, written to one
+guide modelled on how Apple writes for macOS ([[file:STRINGS.org][STRINGS.org]]), and every existing
+string was reviewed against it. Nothing is translated yet; this is what a
+translation would start from, and what keeps the wording consistent in the
+meantime. Log messages and the diagnostics report stay in English, because they
+are read alongside the source.
+
+** Diagnostics
+
+The report has a short AutoEq section once the catalog has been used: the
+catalog's revision and when it was last checked, how many models it lists, how
+loading went this session — with the reason, when it failed — and the size of
+the cache. A “the catalog won't load” report now says why without a second
+round of questions.
 
 * 1.9.2
 

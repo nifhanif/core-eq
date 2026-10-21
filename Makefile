@@ -23,7 +23,7 @@ ifneq (,$(findstring CommandLineTools,$(shell xcode-select -p)))
 export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
 endif
 
-.PHONY: build sign test audio-test format lint install release icons clean
+.PHONY: build sign test audio-test format lint strings install release icons screenshot clean
 
 build:
 	xcodebuild -project $(APP).xcodeproj -target $(APP) -configuration $(CONFIG) $(XCODE_FLAGS) build
@@ -40,6 +40,16 @@ format:
 # gate on it.
 lint:
 	xcrun swift-format lint --strict --recursive --configuration .swift-format CoreEQ CoreEQTests
+
+# Merges every string the compiler extracted into the String Catalog, the way
+# Xcode does on build — xcodebuild extracts them but leaves the catalog alone.
+# Strings no longer in the code are marked stale rather than dropped. One
+# architecture's extraction is enough: both see the same source.
+STRINGSDATA_DIR := build/$(APP).build/$(CONFIG)/$(APP).build/Objects-normal/arm64
+
+strings: build
+	xcrun xcstringstool sync $(APP)/Resources/Localizable.xcstrings \
+		--stringsdata $$(find $(STRINGSDATA_DIR) -name '*.stringsdata')
 
 test:
 	xcodebuild test -project $(APP).xcodeproj -scheme $(APP) -destination 'platform=macOS'
@@ -111,6 +121,16 @@ icons:
 	    $(APP)/Resources/MenuBarIcon$${name}Template@2x.png; \
 	done
 	@echo "Regenerated $(APP)/Resources/AppIcon.icns and $(APP)/Resources/MenuBarIconTemplate*.png"
+
+# The README screenshot of the build, at a fixed window size, saved as
+# design/screenshots/core-eq-<version>.png. Details in Tools/screenshot.sh.
+# Signed with the CoreEQ Release certificate when the keychain has it and no
+# other identity was given, so the audio permission is asked for once rather
+# than on every build.
+SCREENSHOT_IDENTITY = $(or $(SIGN_IDENTITY),$(shell security find-identity -p codesigning 2>/dev/null | grep -q '"CoreEQ Release"' && echo "CoreEQ Release"))
+screenshot:
+	@$(MAKE) sign SIGN_IDENTITY="$(SCREENSHOT_IDENTITY)"
+	@Tools/screenshot.sh $(APP_BUNDLE)
 
 clean:
 	rm -rf build $(DIST_DIR)
