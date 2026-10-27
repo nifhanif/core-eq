@@ -31,45 +31,42 @@ struct Spectrum31BarView: View {
             let spacing: CGFloat = 4
             let sidePadding: CGFloat = 8
             let totalSpacing = spacing * (barCount - 1) + sidePadding * 2
-            let availableWidth = max(0, width - totalSpacing)
-            let barWidth = max(2, availableWidth / barCount)
-            let usableHeight = max(0, height - 16)
+            let barWidth = max(2, max(0, width - totalSpacing) / barCount)
+            let usableHeight = height
 
-            VStack(spacing: 4) {
-                HStack(alignment: .bottom, spacing: spacing) {
-                    ForEach(0..<levels.count, id: \ .self) { index in
-                        ZStack(alignment: .bottom) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            colorForLevel(levels[index]),
-                                            colorForLevel(min(levels[index] + 0.25, 1))
-                                        ]),
-                                        startPoint: .bottom,
-                                        endPoint: .top
-                                    )
+            HStack(alignment: .bottom, spacing: spacing) {
+                ForEach(0..<levels.count, id: \.self) { index in
+                    ZStack(alignment: .bottom) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        colorForLevel(levels[index]),
+                                        colorForLevel(min(levels[index] + 0.25, 1))
+                                    ],
+                                    startPoint: .bottom,
+                                    endPoint: .top
                                 )
-                                .frame(width: barWidth, height: max(4, CGFloat(levels[index]) * usableHeight))
+                            )
+                            .frame(width: barWidth, height: max(4, CGFloat(levels[index]) * usableHeight))
 
-                            Rectangle()
-                                .fill(Color.white.opacity(0.9))
-                                .frame(width: max(1, barWidth * 0.12), height: 2)
-                                .offset(y: -CGFloat(peaks[index]) * usableHeight + 4)
-                        }
+                        Rectangle()
+                            .fill(Color.white.opacity(0.9))
+                            .frame(width: max(1, barWidth * 0.12), height: 2)
+                            .offset(y: -CGFloat(peaks[index]) * usableHeight + 2)
                     }
                 }
-                .frame(width: width, height: height, alignment: .center)
-                .padding(.horizontal, sidePadding)
-                .padding(.vertical, 6)
             }
-            .frame(width: width, height: height)
+            .padding(.horizontal, sidePadding)
+            .frame(width: width, height: height, alignment: .bottom)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.black.opacity(0.22))
             )
         }
-        .frame(minWidth: 200, minHeight: 80)
+        .frame(minWidth: 200, minHeight: 30)
+        .ignoresSafeArea()
+        .background(WindowChromeConfigurator())
         .onAppear {
             analyzer.start()
             updateLevels()
@@ -112,4 +109,28 @@ struct Spectrum31BarView: View {
             return Color(nsColor: .systemRed)
         }
     }
+}
+
+// MARK: - Window chrome
+
+/// Menghilangkan area titlebar di atas window supaya konten mentok ke tepi atas,
+/// dan membuat window bisa digeser dari mana saja.
+private struct WindowChromeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { [weak view] in
+            guard let window = view?.window else { return }
+            window.styleMask.insert(.fullSizeContentView)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isMovableByWindowBackground = true
+            // Hapus tiga baris di bawah ini kalau tombol close/minimize/zoom masih mau ditampilkan.
+            window.standardWindowButton(.closeButton)?.isHidden = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
